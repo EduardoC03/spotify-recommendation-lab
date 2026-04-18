@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MIS 432 — Spotify Recommendation Engine</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800;900&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ── CSS VARIABLES ─────────────────────────────────────────
+       All colours defined once here so the whole UI stays
+       consistent. Change --green to test different accent colours. */
+    :root {
+      --bg:        #121212;
+      --surface:   #181818;
+      --surface2:  #282828;
+      --surface3:  #3e3e3e;
+      --green:     #1DB954;
+      --green-dim: #158a3e;
+      --red:       #e05260;
+      --amber:     #f59e0b;
+      --text:      #FFFFFF;
+      --muted:     #b3b3b3;
+      --dim:       #535353;
+      --radius:    10px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── SUBTLE GRAIN OVERLAY ──────────────────────────────────*/
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+      pointer-events: none; z-index: 999; opacity: 0.35;
+    }
+
+    /* ── PAGE LAYOUT ───────────────────────────────────────────*/
+    .app {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      grid-template-rows: auto 1fr;
+      gap: 0;
+      min-height: 100vh;
+    }
+
+    /* ── HEADER ────────────────────────────────────────────────*/
+    header {
+      grid-column: 1 / -1;
+      background: #000;
+      border-bottom: 1px solid #282828;
+      padding: 18px 32px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .logo {
+      width: 32px; height: 32px;
+      background: var(--green);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .logo svg { width: 18px; height: 18px; fill: #000; }
+    header h1 {
+      font-family: 'Syne', sans-serif;
+      font-size: 1rem; font-weight: 800;
+      letter-spacing: 0.04em; color: var(--text);
+    }
+    header p {
+      font-size: 0.7rem; color: var(--muted);
+      margin-left: auto; letter-spacing: 0.05em;
+    }
+
+    /* ── MAIN CATALOG PANEL ────────────────────────────────────*/
+    .catalog-panel {
+      padding: 28px 32px;
+      overflow-y: auto;
+      border-right: 1px solid #282828;
+    }
+
+    .panel-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 0.65rem; font-weight: 700;
+      letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--muted); margin-bottom: 18px;
+    }
+
+    /* ── SONG CARD ─────────────────────────────────────────────*/
+    .song-card {
+      background: var(--surface);
+      border: 1px solid transparent;
+      border-radius: var(--radius);
+      padding: 14px 16px; margin-bottom: 8px;
+      display: grid;
+      grid-template-columns: 44px 1fr auto;
+      gap: 12px; align-items: center;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .song-card:hover { background: var(--surface2); border-color: var(--surface3); }
+    .song-card.interacted { border-color: #333; }
+
+    .song-art {
+      width: 44px; height: 44px; border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.2rem; flex-shrink: 0;
+    }
+    .song-info { min-width: 0; }
+    .song-name {
+      font-size: 0.82rem; font-weight: 500; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .song-meta { font-size: 0.68rem; color: var(--muted); margin-top: 2px; }
+    .genre-pill {
+      display: inline-block;
+      background: var(--surface2); border: 1px solid var(--surface3);
+      border-radius: 20px; font-size: 0.6rem;
+      padding: 1px 8px; margin-left: 6px;
+      color: var(--dim); vertical-align: middle; letter-spacing: 0.04em;
+    }
+
+    /* ── INTERACTION BUTTONS ───────────────────────────────────*/
+    .song-actions { display: flex; gap: 6px; }
+    .action-btn {
+      border: 1px solid var(--surface3); background: transparent;
+      color: var(--muted); border-radius: 6px; padding: 6px 11px;
+      font-family: 'DM Mono', monospace; font-size: 0.65rem;
+      cursor: pointer; transition: all 0.15s;
+      white-space: nowrap; letter-spacing: 0.03em;
+    }
+    .action-btn:hover { color: var(--text); border-color: var(--muted); }
+    .action-btn.skip.active   { background: #3a1a1e; border-color: var(--red);   color: var(--red); }
+    .action-btn.play.active   { background: #2e2810; border-color: var(--amber); color: var(--amber); }
+    .action-btn.replay.active { background: #0f2e1a; border-color: var(--green); color: var(--green); }
+
+    /* ── RIGHT PANEL ───────────────────────────────────────────*/
+    .right-panel {
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+
+    /* ── RECOMMENDATIONS SECTION ───────────────────────────────*/
+    .recs-section {
+      padding: 24px 22px 16px;
+      border-bottom: 1px solid #282828;
+      flex-shrink: 0;
+    }
+    .recs-empty {
+      color: var(--dim); font-size: 0.72rem;
+      line-height: 1.6; padding: 10px 0;
+    }
+    .rec-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 10px; border-radius: 8px; margin-bottom: 4px;
+      transition: background 0.15s;
+      animation: fadeSlide 0.3s ease both;
+    }
+    .rec-item:hover { background: var(--surface2); }
+    @keyframes fadeSlide {
+      from { opacity: 0; transform: translateX(8px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    .rec-rank { font-size: 0.6rem; color: var(--dim); width: 14px; text-align: right; flex-shrink: 0; }
+    .rec-art {
+      width: 34px; height: 34px; border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.9rem; flex-shrink: 0;
+    }
+    .rec-info { flex: 1; min-width: 0; }
+    .rec-name { font-size: 0.75rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rec-sub  { font-size: 0.62rem; color: var(--muted); margin-top: 1px; }
+    .rec-score { font-size: 0.62rem; color: var(--green); flex-shrink: 0; font-weight: 500; }
+    .score-bar-bg {
+      height: 2px; background: var(--surface3);
+      border-radius: 2px; margin-top: 4px; overflow: hidden;
+    }
+    .score-bar-fill {
+      height: 100%; background: var(--green);
+      border-radius: 2px; transition: width 0.5s ease;
+    }
+
+    /* ── SIMILARITY SECTION ────────────────────────────────────*/
+    .similarity-section {
+      padding: 14px 22px;
+      border-bottom: 1px solid #282828;
+      flex-shrink: 0;
+    }
+    .sim-users { display: flex; flex-direction: column; gap: 5px; margin-top: 10px; }
+    .sim-row { display: flex; align-items: center; gap: 8px; font-size: 0.67rem; }
+    .sim-label { color: var(--muted); width: 60px; flex-shrink: 0; }
+    .sim-bar-bg { flex: 1; height: 4px; background: var(--surface3); border-radius: 2px; overflow: hidden; }
+    .sim-bar-fill { height: 100%; background: var(--green); border-radius: 2px; transition: width 0.5s ease; }
+    .sim-val { color: var(--green); font-size: 0.62rem; width: 32px; text-align: right; }
+
+    /* ── SIGNAL LOG ────────────────────────────────────────────*/
+    .log-section {
+      flex: 1; overflow: hidden; display: flex;
+      flex-direction: column; padding: 14px 22px 18px; min-height: 0;
+    }
+    .log-scroll { flex: 1; overflow-y: auto; min-height: 0; }
+    .log-scroll::-webkit-scrollbar { width: 4px; }
+    .log-scroll::-webkit-scrollbar-track { background: transparent; }
+    .log-scroll::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 2px; }
+    .log-entry {
+      font-size: 0.63rem; line-height: 1.5;
+      padding: 4px 0; border-bottom: 1px solid #1e1e1e;
+      animation: logFade 0.2s ease;
+    }
+    @keyframes logFade { from { opacity: 0; } to { opacity: 1; } }
+    .log-time   { color: var(--dim); margin-right: 6px; }
+    .log-action-skip   { color: var(--red); }
+    .log-action-play   { color: var(--amber); }
+    .log-action-replay { color: var(--green); }
+    .log-song  { color: var(--text); }
+    .log-score { color: var(--dim); }
+
+    /* ── STATS BAR ─────────────────────────────────────────────*/
+    .stats-bar {
+      display: flex; gap: 18px; padding: 10px 22px;
+      background: #0d0d0d; border-top: 1px solid #222; flex-shrink: 0;
+    }
+    .stat-item { text-align: center; }
+    .stat-val { font-family: 'Syne', sans-serif; font-size: 1rem; font-weight: 700; color: var(--green); }
+    .stat-lbl { font-size: 0.58rem; color: var(--dim); letter-spacing: 0.06em; text-transform: uppercase; margin-top: 1px; }
+
+    /* ── WRAPPED BUTTON ────────────────────────────────────────
+       Sits below the catalog. Disabled until 5 interactions. */
+    .wrapped-btn-row {
+      padding: 18px 32px 0;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .wrapped-btn {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: 0.8rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 12px 28px;
+      border-radius: 30px;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+      overflow: hidden;
+    }
+    .wrapped-btn:disabled {
+      background: var(--surface2);
+      color: var(--dim);
+      cursor: not-allowed;
+    }
+    .wrapped-btn:not(:disabled) {
+      background: linear-gradient(135deg, #1DB954 0%, #17a344 50%, #0f7a30 100%);
+      color: #000;
+      box-shadow: 0 0 24px rgba(29,185,84,0.35);
+    }
+    .wrapped-btn:not(:disabled):hover {
+      box-shadow: 0 0 36px rgba(29,185,84,0.55);
+      transform: scale(1.03);
+    }
+    .wrapped-btn:not(:disabled):active { transform: scale(0.98); }
+    .wrapped-hint {
+      font-size: 0.65rem; color: var(--dim);
+      letter-spacing: 0.04em;
+    }
+    .wrapped-hint span { color: var(--green); }
+
+    /* ── WRAPPED MODAL OVERLAY ─────────────────────────────────
+       Full-screen overlay that slides in when Wrapped is generated.
+       The design uses a bold Spotify-branded gradient with large
+       type — similar to the real Wrapped aesthetic. */
+    .wrapped-overlay {
+      position: fixed; inset: 0; z-index: 1000;
+      background: rgba(0,0,0,0.88);
+      display: flex; align-items: center; justify-content: center;
+      padding: 20px;
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.3s ease;
+      backdrop-filter: blur(6px);
+    }
+    .wrapped-overlay.visible {
+      opacity: 1; pointer-events: all;
+    }
+
+    /* The card itself */
+    .wrapped-card {
+      width: 100%; max-width: 480px;
+      background: #0a0a0a;
+      border: 1px solid #282828;
+      border-radius: 20px;
+      overflow: hidden;
+      transform: translateY(24px) scale(0.97);
+      transition: transform 0.35s cubic-bezier(0.34,1.56,0.64,1);
+      box-shadow: 0 40px 80px rgba(0,0,0,0.7);
+    }
+    .wrapped-overlay.visible .wrapped-card {
+      transform: translateY(0) scale(1);
+    }
+
+    /* Gradient hero banner at the top */
+    .wrapped-hero {
+      background: linear-gradient(160deg, #0a3d1f 0%, #1a6b3a 40%, #0e4a27 70%, #071a0f 100%);
+      padding: 36px 32px 28px;
+      position: relative;
+      overflow: hidden;
+    }
+    /* Decorative circles in the hero */
+    .wrapped-hero::before,
+    .wrapped-hero::after {
+      content: '';
+      position: absolute;
+      border-radius: 50%;
+      opacity: 0.15;
+    }
+    .wrapped-hero::before {
+      width: 240px; height: 240px;
+      background: var(--green);
+      top: -80px; right: -60px;
+    }
+    .wrapped-hero::after {
+      width: 120px; height: 120px;
+      background: #fff;
+      bottom: -40px; left: 20px;
+    }
+
+    .wrapped-year {
+      font-family: 'Syne', sans-serif;
+      font-size: 0.65rem; font-weight: 700;
+      letter-spacing: 0.2em; text-transform: uppercase;
+      color: rgba(255,255,255,0.5);
+      margin-bottom: 6px;
+    }
+    .wrapped-headline {
+      font-family: 'Syne', sans-serif;
+      font-size: 2.4rem; font-weight: 900;
+      line-height: 1.05;
+      color: #fff;
+      letter-spacing: -0.02em;
+    }
+    .wrapped-headline span { color: var(--green); }
+    .wrapped-subline {
+      font-size: 0.72rem; color: rgba(255,255,255,0.6);
+      margin-top: 10px; line-height: 1.5;
+    }
+
+    /* Close button */
+    .wrapped-close {
+      position: absolute; top: 16px; right: 18px;
+      background: rgba(0,0,0,0.4);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: rgba(255,255,255,0.7);
+      border-radius: 50%; width: 30px; height: 30px;
+      font-size: 1rem; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.15s;
+    }
+    .wrapped-close:hover { background: rgba(0,0,0,0.7); color: #fff; }
+
+    /* Stat rows inside the card */
+    .wrapped-body { padding: 24px 28px 28px; }
+
+    .wrapped-section { margin-bottom: 22px; }
+    .wrapped-section-label {
+      font-size: 0.6rem; letter-spacing: 0.16em;
+      text-transform: uppercase; color: var(--dim);
+      margin-bottom: 10px; font-weight: 500;
+    }
+
+    /* Top songs list */
+    .wrapped-song-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 8px 0;
+      border-bottom: 1px solid #1a1a1a;
+      animation: fadeSlide 0.4s ease both;
+    }
+    .wrapped-song-row:last-child { border-bottom: none; }
+    .wrapped-song-num {
+      font-family: 'Syne', sans-serif;
+      font-size: 1.1rem; font-weight: 900;
+      color: var(--green); width: 24px;
+      text-align: right; flex-shrink: 0;
+    }
+    .wrapped-song-art {
+      width: 38px; height: 38px; border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1rem; flex-shrink: 0;
+    }
+    .wrapped-song-info { flex: 1; min-width: 0; }
+    .wrapped-song-name {
+      font-size: 0.8rem; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .wrapped-song-meta { font-size: 0.63rem; color: var(--muted); margin-top: 1px; }
+    .wrapped-score-badge {
+      background: #0f2e1a; border: 1px solid #1a5c32;
+      color: var(--green); font-size: 0.6rem;
+      padding: 3px 8px; border-radius: 12px; flex-shrink: 0;
+    }
+
+    /* Big stat tiles (artist / genre / interactions) */
+    .wrapped-tiles {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+    }
+    .wrapped-tile {
+      background: var(--surface);
+      border: 1px solid #282828;
+      border-radius: 12px;
+      padding: 14px 16px;
+      animation: fadeSlide 0.5s ease both;
+    }
+    .wrapped-tile-label {
+      font-size: 0.58rem; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--dim); margin-bottom: 6px;
+    }
+    .wrapped-tile-val {
+      font-family: 'Syne', sans-serif;
+      font-size: 1.05rem; font-weight: 800;
+      color: var(--text); line-height: 1.2;
+    }
+    .wrapped-tile-val.green { color: var(--green); }
+
+    /* Fun personalised line at the bottom */
+    .wrapped-fun-line {
+      background: linear-gradient(135deg, #0f2e1a, #0a1a10);
+      border: 1px solid #1a5c32;
+      border-radius: 12px;
+      padding: 16px 18px;
+      font-size: 0.75rem;
+      color: var(--green);
+      line-height: 1.55;
+      font-weight: 500;
+      animation: fadeSlide 0.6s ease both;
+    }
+
+    /* Data provenance note */
+    .wrapped-note {
+      margin-top: 16px;
+      padding: 10px 14px;
+      background: #111;
+      border-left: 3px solid var(--surface3);
+      border-radius: 0 8px 8px 0;
+      font-size: 0.6rem;
+      color: var(--dim);
+      line-height: 1.55;
+    }
+    .wrapped-note span { color: var(--muted); }
+
+    /* ── SCROLLBAR GLOBAL ──────────────────────────────────────*/
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 3px; }
+  </style>
+</head>
+
+<body>
+<div class="app">
+
+  <!-- ══════════════════════════════════════════════════════════
+       HEADER
+  ══════════════════════════════════════════════════════════ -->
+  <header>
+    <div class="logo">
+      <svg viewBox="0 0 24 24"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
+    </div>
+    <h1>Recommendation Engine</h1>
+    <p>MIS 432 · Western Washington University · Collaborative Filtering</p>
+  </header>
+
+  <!-- ══════════════════════════════════════════════════════════
+       LEFT PANEL — Song catalog + Wrapped button
+  ══════════════════════════════════════════════════════════ -->
+  <main class="catalog-panel">
+    <div class="panel-title">Song Catalog — interact to train your recommendations</div>
+    <div id="catalog"></div>
+
+    <!-- ── WRAPPED BUTTON ──────────────────────────────────────
+         Disabled until the user has interacted with 5+ songs.
+         The hint text counts down how many more are needed. -->
+    <div class="wrapped-btn-row">
+      <button class="wrapped-btn" id="wrapped-btn" disabled onclick="showWrapped()">
+        🎁 Generate my Wrapped
+      </button>
+      <span class="wrapped-hint" id="wrapped-hint">Interact with <span id="wrapped-countdown">5</span> more songs to unlock</span>
+    </div>
+    <div style="height:32px"></div>
+  </main>
+
+  <!-- ══════════════════════════════════════════════════════════
+       RIGHT PANEL — Recommendations, taste twins, signal log
+  ══════════════════════════════════════════════════════════ -->
+  <aside class="right-panel">
+
+    <div class="recs-section">
+      <div class="panel-title">For You</div>
+      <div id="recs-list">
+        <p class="recs-empty">Interact with songs above to generate recommendations.</p>
+      </div>
+    </div>
+
+    <div class="similarity-section">
+      <div class="panel-title">Your Taste Twins</div>
+      <div id="sim-list" class="sim-users">
+        <p class="recs-empty" style="font-size:0.68rem">Waiting for interactions…</p>
+      </div>
+    </div>
+
+    <div class="log-section">
+      <div class="panel-title" style="margin-bottom:10px">Signal Log</div>
+      <div class="log-scroll" id="log-scroll">
+        <div class="log-entry" style="color:var(--dim);font-size:0.63rem">Waiting for your first interaction…</div>
+      </div>
+    </div>
+
+    <div class="stats-bar">
+      <div class="stat-item">
+        <div class="stat-val" id="stat-interactions">0</div>
+        <div class="stat-lbl">Signals</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-val" id="stat-replays">0</div>
+        <div class="stat-lbl">Replays</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-val" id="stat-skips">0</div>
+        <div class="stat-lbl">Skips</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-val" id="stat-recs">0</div>
+        <div class="stat-lbl">Recs</div>
+      </div>
+    </div>
+
+  </aside>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     WRAPPED MODAL OVERLAY
+     Hidden by default. Becomes visible when showWrapped() fires.
+     Contains the full Wrapped summary panel.
+════════════════════════════════════════════════════════════════ -->
+<div class="wrapped-overlay" id="wrapped-overlay" onclick="handleOverlayClick(event)">
+  <div class="wrapped-card" id="wrapped-card">
+
+    <!-- Hero banner with gradient background -->
+    <div class="wrapped-hero">
+      <button class="wrapped-close" onclick="closeWrapped()">✕</button>
+      <div class="wrapped-year">MIS 432 · Session Recap</div>
+      <div class="wrapped-headline">Your<br/><span>Wrapped</span></div>
+      <div class="wrapped-subline" id="wrapped-subline">Based on your session interactions</div>
+    </div>
+
+    <!-- Body with all stats -->
+    <div class="wrapped-body">
+
+      <!-- Top 3 songs section -->
+      <div class="wrapped-section">
+        <div class="wrapped-section-label">Your Top Songs This Session</div>
+        <div id="wrapped-top-songs"></div>
+      </div>
+
+      <!-- Tiles: top artist, top genre, total interactions -->
+      <div class="wrapped-section">
+        <div class="wrapped-tiles" id="wrapped-tiles"></div>
+      </div>
+
+      <!-- Personalised fun line -->
+      <div class="wrapped-fun-line" id="wrapped-fun-line"></div>
+
+      <!-- Data provenance note -->
+      <div class="wrapped-note">
+        <span>📊 How this was made:</span> This Wrapped was generated from the exact same data log that powered your recommendations above. Every Skip (0.1), Play (0.5), and Replay (0.9) signal you sent was used by both the collaborative filtering engine and this summary — no separate data collection.
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+/* ════════════════════════════════════════════════════════════
+   DATA — Song catalog and pre-defined user histories
+   ════════════════════════════════════════════════════════════ */
+const CATALOG = [
+  { name:"Blinding Lights",      artist:"The Weeknd",                   genre:"Pop",       color:"#1a3a5c", emoji:"🌙" },
+  { name:"HUMBLE.",              artist:"Kendrick Lamar",                genre:"Hip-Hop",   color:"#2c1a0e", emoji:"👑" },
+  { name:"Levitating",           artist:"Dua Lipa",                      genre:"Pop",       color:"#1a1a4a", emoji:"✨" },
+  { name:"bad guy",              artist:"Billie Eilish",                 genre:"Indie Pop", color:"#0e2e1a", emoji:"🖤" },
+  { name:"God's Plan",           artist:"Drake",                         genre:"Hip-Hop",   color:"#2a1a00", emoji:"🕊️" },
+  { name:"As It Was",            artist:"Harry Styles",                  genre:"Pop",       color:"#3a0e2e", emoji:"🌸" },
+  { name:"MONTERO",              artist:"Lil Nas X",                     genre:"Hip-Hop",   color:"#1a0e3a", emoji:"🎸" },
+  { name:"drivers license",      artist:"Olivia Rodrigo",                genre:"Pop",       color:"#2e1a1a", emoji:"🚗" },
+  { name:"Watermelon Sugar",     artist:"Harry Styles",                  genre:"Pop",       color:"#3a1a1a", emoji:"🍉" },
+  { name:"Peaches",              artist:"Justin Bieber",                 genre:"R&B",       color:"#2e2200", emoji:"🍑" },
+  { name:"Industry Baby",        artist:"Lil Nas X",                     genre:"Hip-Hop",   color:"#1a2e2e", emoji:"🎺" },
+  { name:"good 4 u",             artist:"Olivia Rodrigo",                genre:"Pop Rock",  color:"#2e0e1a", emoji:"💢" },
+  { name:"Leave The Door Open",  artist:"Bruno Mars",                    genre:"R&B",       color:"#1a1a2e", emoji:"🎷" },
+  { name:"STAY",                 artist:"The Kid LAROI & Justin Bieber", genre:"Pop",       color:"#2e1a2e", emoji:"💫" },
+  { name:"Heat Waves",           artist:"Glass Animals",                 genre:"Indie",     color:"#0e2e2e", emoji:"🌊" },
+];
+
+const EXISTING_USERS = {
+  user_01: {"As It Was":0.9,"Blinding Lights":0.9,"God's Plan":0.1,"HUMBLE.":0.1,"Heat Waves":0.5,"Industry Baby":0.1,"Leave The Door Open":0.1,"Levitating":0.9,"MONTERO":0.5,"Peaches":0.1,"STAY":0.9,"Watermelon Sugar":0.9,"bad guy":0.1,"drivers license":0.9,"good 4 u":0.5},
+  user_02: {"As It Was":0.5,"Blinding Lights":0.9,"God's Plan":0.1,"HUMBLE.":0.1,"Heat Waves":0.5,"Industry Baby":0.1,"Leave The Door Open":0.1,"Levitating":0.9,"MONTERO":0.1,"Peaches":0.9,"STAY":0.5,"Watermelon Sugar":0.9,"bad guy":0.5,"drivers license":0.9,"good 4 u":0.1},
+  user_03: {"As It Was":0.1,"Blinding Lights":0.1,"God's Plan":0.9,"HUMBLE.":0.9,"Heat Waves":0.1,"Industry Baby":0.9,"Leave The Door Open":0.1,"Levitating":0.1,"MONTERO":0.5,"Peaches":0.5,"STAY":0.1,"Watermelon Sugar":0.5,"bad guy":0.9,"drivers license":0.1,"good 4 u":0.1},
+  user_04: {"As It Was":0.5,"Blinding Lights":0.1,"God's Plan":0.9,"HUMBLE.":0.9,"Heat Waves":0.5,"Industry Baby":0.9,"Leave The Door Open":0.1,"Levitating":0.1,"MONTERO":0.9,"Peaches":0.1,"STAY":0.1,"Watermelon Sugar":0.9,"bad guy":0.5,"drivers license":0.1,"good 4 u":0.1},
+  user_05: {"As It Was":0.9,"Blinding Lights":0.9,"God's Plan":0.9,"HUMBLE.":0.5,"Heat Waves":0.5,"Industry Baby":0.1,"Leave The Door Open":0.5,"Levitating":0.5,"MONTERO":0.1,"Peaches":0.9,"STAY":0.5,"Watermelon Sugar":0.5,"bad guy":0.5,"drivers license":0.1,"good 4 u":0.5},
+  user_06: {"As It Was":0.9,"Blinding Lights":0.9,"God's Plan":0.1,"HUMBLE.":0.5,"Heat Waves":0.1,"Industry Baby":0.1,"Leave The Door Open":0.9,"Levitating":0.9,"MONTERO":0.1,"Peaches":0.9,"STAY":0.9,"Watermelon Sugar":0.5,"bad guy":0.1,"drivers license":0.9,"good 4 u":0.9},
+  user_07: {"As It Was":0.5,"Blinding Lights":0.1,"God's Plan":0.1,"HUMBLE.":0.5,"Heat Waves":0.9,"Industry Baby":0.1,"Leave The Door Open":0.1,"Levitating":0.9,"MONTERO":0.9,"Peaches":0.5,"STAY":0.5,"Watermelon Sugar":0.9,"bad guy":0.9,"drivers license":0.5,"good 4 u":0.5},
+  user_08: {"As It Was":0.5,"Blinding Lights":0.9,"God's Plan":0.9,"HUMBLE.":0.1,"Heat Waves":0.1,"Industry Baby":0.9,"Leave The Door Open":0.5,"Levitating":0.9,"MONTERO":0.1,"Peaches":0.9,"STAY":0.9,"Watermelon Sugar":0.9,"bad guy":0.5,"drivers license":0.9,"good 4 u":0.9},
+  user_09: {"As It Was":0.5,"Blinding Lights":0.9,"God's Plan":0.9,"HUMBLE.":0.9,"Heat Waves":0.1,"Industry Baby":0.9,"Leave The Door Open":0.5,"Levitating":0.9,"MONTERO":0.9,"Peaches":0.5,"STAY":0.9,"Watermelon Sugar":0.9,"bad guy":0.1,"drivers license":0.9,"good 4 u":0.1},
+};
+
+/* ════════════════════════════════════════════════════════════
+   STATE
+   ════════════════════════════════════════════════════════════ */
+const userScores = {};
+let totalInteractions = 0, totalReplays = 0, totalSkips = 0;
+const WRAPPED_THRESHOLD = 5;  // interactions needed to unlock Wrapped
+
+/* ════════════════════════════════════════════════════════════
+   BUILD CATALOG UI
+   ════════════════════════════════════════════════════════════ */
+function buildCatalog() {
+  const container = document.getElementById('catalog');
+  CATALOG.forEach(song => {
+    const card = document.createElement('div');
+    card.className = 'song-card';
+    card.id = 'card-' + song.name.replace(/\s+/g,'_');
+    card.innerHTML = `
+      <div class="song-art" style="background:${song.color}">${song.emoji}</div>
+      <div class="song-info">
+        <div class="song-name">${song.name}</div>
+        <div class="song-meta">${song.artist}<span class="genre-pill">${song.genre}</span></div>
+      </div>
+      <div class="song-actions">
+        <button class="action-btn skip"   data-song="${song.name}" data-score="0.1" onclick="interact(this)">⏭ Skip</button>
+        <button class="action-btn play"   data-song="${song.name}" data-score="0.5" onclick="interact(this)">▶ Play</button>
+        <button class="action-btn replay" data-song="${song.name}" data-score="0.9" onclick="interact(this)">🔁 Replay</button>
+      </div>`;
+    container.appendChild(card);
+  });
+}
+
+/* ════════════════════════════════════════════════════════════
+   INTERACT — records signal, updates UI, runs CF + Wrapped gate
+   ════════════════════════════════════════════════════════════ */
+function interact(btn) {
+  const song  = btn.dataset.song;
+  const score = parseFloat(btn.dataset.score);
+  const type  = btn.classList.contains('skip') ? 'skip'
+              : btn.classList.contains('play') ? 'play' : 'replay';
+
+  const isNew = userScores[song] === undefined;
+
+  userScores[song] = score;
+
+  const siblings = btn.parentElement.querySelectorAll('.action-btn');
+  siblings.forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  btn.closest('.song-card').classList.add('interacted');
+
+  // Only count new songs toward the interaction total
+  if (isNew) {
+    totalInteractions++;
+    if (type === 'replay') totalReplays++;
+    if (type === 'skip')   totalSkips++;
+  } else {
+    // Re-rate: adjust counters if type changed
+    if (type === 'replay') totalReplays = Math.min(totalReplays + 1, totalInteractions);
+    if (type === 'skip')   totalSkips   = Math.min(totalSkips   + 1, totalInteractions);
+  }
+
+  document.getElementById('stat-interactions').textContent = totalInteractions;
+  document.getElementById('stat-replays').textContent      = totalReplays;
+  document.getElementById('stat-skips').textContent        = totalSkips;
+
+  logSignal(song, type, score);
+  runCollaborativeFiltering();
+
+  /* ── Update Wrapped button state ──
+     Count the number of unique songs interacted with.
+     Enable the button once that hits WRAPPED_THRESHOLD. */
+  const uniqueInteracted = Object.keys(userScores).length;
+  const remaining = Math.max(0, WRAPPED_THRESHOLD - uniqueInteracted);
+  const btn2  = document.getElementById('wrapped-btn');
+  const hint  = document.getElementById('wrapped-hint');
+  const count = document.getElementById('wrapped-countdown');
+
+  if (uniqueInteracted >= WRAPPED_THRESHOLD) {
+    btn2.disabled = false;
+    hint.innerHTML = '🎉 Your session Wrapped is ready!';
+  } else {
+    btn2.disabled = true;
+    count.textContent = remaining;
+    hint.innerHTML = `Interact with <span id="wrapped-countdown">${remaining}</span> more song${remaining !== 1 ? 's' : ''} to unlock`;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   LOG SIGNAL
+   ════════════════════════════════════════════════════════════ */
+function logSignal(song, type, score) {
+  const log   = document.getElementById('log-scroll');
+  const time  = new Date().toTimeString().slice(0,8);
+  const cls   = `log-action-${type}`;
+  const label = type === 'skip' ? '⏭ SKIP' : type === 'play' ? '▶ PLAY' : '🔁 REPLAY';
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  entry.innerHTML = `<span class="log-time">${time}</span><span class="${cls}">${label}</span> <span class="log-song">${song}</span> <span class="log-score">→ ${score}</span>`;
+  log.prepend(entry);
+}
+
+/* ════════════════════════════════════════════════════════════
+   COSINE SIMILARITY
+   ════════════════════════════════════════════════════════════ */
+function cosineSimilarity(vecA, vecB) {
+  let dot = 0, magA = 0, magB = 0;
+  CATALOG.forEach(({ name }) => {
+    const a = vecA[name] || 0;
+    const b = vecB[name] || 0;
+    dot  += a * b;
+    magA += a * a;
+    magB += b * b;
+  });
+  if (magA === 0 || magB === 0) return 0;
+  return dot / (Math.sqrt(magA) * Math.sqrt(magB));
+}
+
+/* ════════════════════════════════════════════════════════════
+   COLLABORATIVE FILTERING ENGINE
+   ════════════════════════════════════════════════════════════ */
+function runCollaborativeFiltering() {
+  if (Object.keys(userScores).length === 0) return;
+
+  const similarities = Object.entries(EXISTING_USERS).map(([uid, scores]) => ({
+    uid, sim: cosineSimilarity(userScores, scores)
+  })).sort((a, b) => b.sim - a.sim);
+
+  const topNeighbours = similarities.slice(0, 3);
+  renderSimilarUsers(topNeighbours);
+
+  const songScores = {};
+  topNeighbours.forEach(({ uid, sim }) => {
+    Object.entries(EXISTING_USERS[uid]).forEach(([song, engagement]) => {
+      if (userScores[song] === undefined) {
+        if (!songScores[song]) songScores[song] = { weightedSum: 0, simSum: 0 };
+        songScores[song].weightedSum += sim * engagement;
+        songScores[song].simSum      += sim;
+      }
+    });
+  });
+
+  const predictions = Object.entries(songScores)
+    .filter(([, v]) => v.simSum > 0)
+    .map(([song, v]) => ({ song, score: v.weightedSum / v.simSum }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
+
+  renderRecommendations(predictions);
+  document.getElementById('stat-recs').textContent = predictions.length;
+}
+
+/* ════════════════════════════════════════════════════════════
+   RENDER RECOMMENDATIONS
+   ════════════════════════════════════════════════════════════ */
+function renderRecommendations(predictions) {
+  const container = document.getElementById('recs-list');
+  if (predictions.length === 0) {
+    container.innerHTML = '<p class="recs-empty">No new songs to recommend — interact with more songs!</p>';
+    return;
+  }
+  const maxScore = predictions[0].score;
+  container.innerHTML = predictions.map((p, i) => {
+    const meta = CATALOG.find(s => s.name === p.song);
+    const pct  = ((p.score / maxScore) * 100).toFixed(0);
+    return `
+      <div class="rec-item">
+        <div class="rec-rank">${i + 1}</div>
+        <div class="rec-art" style="background:${meta.color}">${meta.emoji}</div>
+        <div class="rec-info">
+          <div class="rec-name">${p.song}</div>
+          <div class="rec-sub">${meta.artist} · ${meta.genre}</div>
+          <div class="score-bar-bg"><div class="score-bar-fill" style="width:${pct}%"></div></div>
+        </div>
+        <div class="rec-score">${p.score.toFixed(2)}</div>
+      </div>`;
+  }).join('');
+}
+
+/* ════════════════════════════════════════════════════════════
+   RENDER SIMILAR USERS
+   ════════════════════════════════════════════════════════════ */
+function renderSimilarUsers(topNeighbours) {
+  document.getElementById('sim-list').innerHTML = topNeighbours.map(({ uid, sim }) => `
+    <div class="sim-row">
+      <div class="sim-label">${uid}</div>
+      <div class="sim-bar-bg"><div class="sim-bar-fill" style="width:${(sim*100).toFixed(0)}%"></div></div>
+      <div class="sim-val">${sim.toFixed(2)}</div>
+    </div>`).join('');
+}
+
+/* ════════════════════════════════════════════════════════════
+   COMPUTE WRAPPED DATA
+   This function reads directly from userScores — the same
+   object that drives the recommendation engine — and computes
+   summary statistics from it.
+
+   Top 3 songs:   Sort userScores by engagement score descending.
+   Top artist:    For each song with score ≥ 0.5, tally artist counts.
+                  Highest tally wins.
+   Top genre:     Same approach but group by genre.
+   Fun line:      Picks the top artist and generates a playful stat
+                  by comparing replay count to a fictional listener base.
+   ════════════════════════════════════════════════════════════ */
+function computeWrapped() {
+  const entries = Object.entries(userScores); // [[songName, score], ...]
+
+  /* ── Top 3 songs by engagement score ── */
+  const top3 = [...entries]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([name, score]) => ({ name, score, meta: CATALOG.find(s => s.name === name) }));
+
+  /* ── Top artist: artist with most high-engagement songs (score ≥ 0.5) ── */
+  const artistTally = {};
+  entries.forEach(([name, score]) => {
+    if (score >= 0.5) {
+      const meta = CATALOG.find(s => s.name === name);
+      if (meta) artistTally[meta.artist] = (artistTally[meta.artist] || 0) + 1;
+    }
+  });
+  const topArtist = Object.entries(artistTally).sort((a,b) => b[1]-a[1])[0]?.[0] || 'N/A';
+
+  /* ── Top genre: genre with highest average engagement score ── */
+  const genreAccum = {};
+  entries.forEach(([name, score]) => {
+    const meta = CATALOG.find(s => s.name === name);
+    if (meta) {
+      if (!genreAccum[meta.genre]) genreAccum[meta.genre] = { sum: 0, count: 0 };
+      genreAccum[meta.genre].sum   += score;
+      genreAccum[meta.genre].count += 1;
+    }
+  });
+  const topGenre = Object.entries(genreAccum)
+    .map(([g, v]) => ({ genre: g, avg: v.sum / v.count }))
+    .sort((a, b) => b.avg - a.avg)[0]?.genre || 'N/A';
+
+  /* ── Replay count for the fun personalised line ── */
+  const replayCount = entries.filter(([, s]) => s === 0.9).length;
+
+  /* ── Generate the fun line ──
+     We seed a fake percentile from the replay rate relative to
+     catalog size so it feels personal without real user data. */
+  const replayRate = entries.length > 0 ? replayCount / entries.length : 0;
+  const pctile = Math.max(1, Math.round((1 - replayRate) * 95));
+  const funLine = replayCount === 0
+    ? `You haven't replayed any songs yet — but your skip rate tells us you know exactly what you want. 🎯`
+    : `You replayed ${replayCount} song${replayCount > 1 ? 's' : ''} this session, putting you in the top ${pctile}% of ${topArtist} listeners in this session. Your engagement score of ${(replayCount / entries.length * 0.9).toFixed(2)} says you don't just listen — you commit. 🔁`;
+
+  return { top3, topArtist, topGenre, funLine };
+}
+
+/* ════════════════════════════════════════════════════════════
+   SHOW WRAPPED — computes stats then renders the modal
+   ════════════════════════════════════════════════════════════ */
+function showWrapped() {
+  const { top3, topArtist, topGenre, funLine } = computeWrapped();
+  const totalSongs = Object.keys(userScores).length;
+
+  /* ── Render top 3 songs ── */
+  document.getElementById('wrapped-top-songs').innerHTML = top3.map((s, i) => `
+    <div class="wrapped-song-row" style="animation-delay:${i * 0.08}s">
+      <div class="wrapped-song-num">${i + 1}</div>
+      <div class="wrapped-song-art" style="background:${s.meta.color}">${s.meta.emoji}</div>
+      <div class="wrapped-song-info">
+        <div class="wrapped-song-name">${s.name}</div>
+        <div class="wrapped-song-meta">${s.meta.artist} · ${s.meta.genre}</div>
+      </div>
+      <div class="wrapped-score-badge">${s.score === 0.9 ? '🔁 Replay' : s.score === 0.5 ? '▶ Play' : '⏭ Skip'}</div>
+    </div>`).join('');
+
+  /* ── Render stat tiles ── */
+  document.getElementById('wrapped-tiles').innerHTML = `
+    <div class="wrapped-tile" style="animation-delay:0.2s">
+      <div class="wrapped-tile-label">Top Artist</div>
+      <div class="wrapped-tile-val">${topArtist}</div>
+    </div>
+    <div class="wrapped-tile" style="animation-delay:0.25s">
+      <div class="wrapped-tile-label">Top Genre</div>
+      <div class="wrapped-tile-val green">${topGenre}</div>
+    </div>
+    <div class="wrapped-tile" style="animation-delay:0.3s">
+      <div class="wrapped-tile-label">Songs Rated</div>
+      <div class="wrapped-tile-val green">${totalSongs}</div>
+    </div>
+    <div class="wrapped-tile" style="animation-delay:0.35s">
+      <div class="wrapped-tile-label">Replays</div>
+      <div class="wrapped-tile-val">${totalReplays}</div>
+    </div>`;
+
+  /* ── Render fun line ── */
+  document.getElementById('wrapped-fun-line').textContent = funLine;
+
+  /* ── Render subline in hero ── */
+  document.getElementById('wrapped-subline').textContent =
+    `${totalSongs} songs · ${totalReplays} replays · ${totalSkips} skips`;
+
+  /* ── Show overlay ── */
+  document.getElementById('wrapped-overlay').classList.add('visible');
+  document.body.style.overflow = 'hidden';
+}
+
+/* ════════════════════════════════════════════════════════════
+   CLOSE WRAPPED
+   ════════════════════════════════════════════════════════════ */
+function closeWrapped() {
+  document.getElementById('wrapped-overlay').classList.remove('visible');
+  document.body.style.overflow = '';
+}
+
+/* Close if user clicks outside the card */
+function handleOverlayClick(e) {
+  if (e.target === document.getElementById('wrapped-overlay')) closeWrapped();
+}
+
+/* Close on Escape key */
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeWrapped(); });
+
+/* ════════════════════════════════════════════════════════════
+   INIT
+   ════════════════════════════════════════════════════════════ */
+buildCatalog();
+</script>
+</body>
+</html>
